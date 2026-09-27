@@ -6,7 +6,9 @@ Local dictation assistant for Linux and Windows. **Ctrl+Alt+D** starts and stops
 
 ## Usage
 
-1. Download `freisprech-linux-x86_64`, make it executable and run it. No installation needed.
+1. Download the file for your system from the [releases](https://github.com/trapplab/freisprech/releases) and start it:
+   - Linux: `freisprech-linux-x86_64`. The browser drops the executable bit, so run `chmod +x freisprech-linux-x86_64` first (or tick "Executable" in the file properties).
+   - Windows: `freisprech-windows-x86_64.exe`. It is not signed, so SmartScreen warns: *More info → Run anyway*.
 2. On first start:
    - On Linux, confirm two desktop dialogs: the keyboard shortcut and permission to type.
    - The model (about 760 MB) is downloaded once. Progress is shown in the tray tooltip, the settings window and the console.
@@ -14,9 +16,20 @@ Local dictation assistant for Linux and Windows. **Ctrl+Alt+D** starts and stops
 
 Settings (language, microphone) are available from the tray icon, and on Linux also by starting the program a second time or from the app menu. Quit via the tray menu, or without a tray via the button in the settings window.
 
+### Install, autostart, uninstall
+
+The downloaded file runs from wherever it is, no installer needed. To keep it:
+
+- **Install** in the settings copies the app to a fixed location, adds it to the app menu and restarts it from there. Installing a newer download the same way updates it.
+- **Start at login** starts the installed copy in the tray at login. It is only available once installed.
+- **Uninstall** in the settings of the installed copy removes the app, its menu entry, autostart and the unpacked native libraries. The model, settings and logs stay; see [Files](#files) to remove them too. On Windows the app can also be removed under *Settings → Apps → Installed apps*.
+
+Everything goes into the user's home folder, no admin rights needed.
+
 | Option | Purpose |
 |---|---|
 | `--settings` | Open the settings window on start |
+| `--uninstall` | Uninstall like the button in the settings (on Linux, quit the running app first) |
 | `--toggle` | Linux only: start/stop dictation in the running instance (fallback if the desktop offers no global shortcut) |
 | `--file <pcm>` | Test: transcribe a file (16 kHz, mono, s16le) |
 | `--type-text <text>` | Test: type text without speech recognition |
@@ -36,11 +49,13 @@ The Linux binary needs glibc ≥ 2.35. Debian's GNOME has no tray by default.
 
 | What | Linux | Windows |
 |---|---|---|
+| Installed app | `~/.local/bin/freisprech` | `%LOCALAPPDATA%\Programs\Freisprech\freisprech.exe` |
+| Menu entry | `~/.local/share/applications/io.github.trapplab.Freisprech.desktop` (created on every start, points to the installed copy if there is one) | Start menu shortcut `Freisprech`, entry under *Installed apps* (registry `HKCU\…\Uninstall\Freisprech`) |
+| Autostart | `~/.config/autostart/io.github.trapplab.Freisprech.desktop` | registry value `Freisprech` under `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` |
 | Settings | `~/.config/freisprech/config.toml` | `%APPDATA%\freisprech\` |
 | Logs | `~/.local/share/freisprech/logs/` | `%LOCALAPPDATA%\freisprech\logs\` |
 | Native libraries (unpacked by the app) | `~/.local/share/freisprech/native/` | `%LOCALAPPDATA%\freisprech\native\` |
 | Model cache | `~/.freisprech/` | `%USERPROFILE%\.freisprech\` |
-| Desktop entry (created by the app) | `~/.local/share/applications/io.github.trapplab.Freisprech.desktop` | – |
 
 ## Development
 

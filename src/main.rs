@@ -37,6 +37,11 @@ struct Cli {
     #[arg(long)]
     toggle: bool,
 
+    /// Remove the installed copy, its menu entry and autostart (model, settings and logs
+    /// stay)
+    #[arg(long)]
+    uninstall: bool,
+
     /// Test: only transcribe an audio file and print the text (raw PCM, 16 kHz, mono, s16le;
     /// e.g. `ffmpeg -i in.wav -ar 16000 -ac 1 -f s16le in.pcm`)
     #[arg(long)]
@@ -65,7 +70,9 @@ fn main() -> Result<()> {
     let _log_guard = logging::init()?;
     tracing::info!(version = env!("CARGO_PKG_VERSION"), log_dir = %logging::log_dir().display(), "Start");
 
-    let result = if cli.file.is_some() || cli.type_text.is_some() {
+    let result = if cli.uninstall {
+        uninstall()
+    } else if cli.file.is_some() || cli.type_text.is_some() {
         tokio::runtime::Runtime::new()?.block_on(run_test_mode(&cli))
     } else {
         run_app(cli.settings)
@@ -99,7 +106,22 @@ fn run_app(show_settings: bool) -> Result<()> {
     let controller = controller::spawn(config_rx, toggle_rx, status_tx);
     let result = ui::run(config, config_tx, status_rx, settings_rx, show_settings);
     controller.shutdown();
+    install::spawn_after_exit();
     Ok(result?)
+}
+
+fn uninstall() -> Result<()> {
+    #[cfg(target_os = "linux")]
+    anyhow::ensure!(
+        !ipc::send(ipc::Command::Settings),
+        "Freisprech is running – use Uninstall in the settings window that just opened"
+    );
+    #[cfg(windows)]
+    install::stop_other_instances();
+    install::uninstall()?;
+    install::spawn_after_exit();
+    println!("Freisprech uninstalled. Model, settings and logs were kept.");
+    Ok(())
 }
 
 async fn run_test_mode(cli: &Cli) -> Result<()> {

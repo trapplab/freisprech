@@ -8,7 +8,9 @@ use std::time::Duration;
 
 use iced::keyboard::{self, key};
 use iced::time::Instant;
-use iced::widget::{button, column, container, pick_list, progress_bar, row, rule, space, text};
+use iced::widget::{
+    button, checkbox, column, container, pick_list, progress_bar, row, rule, space, text,
+};
 use iced::{border, window, Alignment, Element, Length, Size, Subscription, Task, Theme};
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -16,6 +18,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 use crate::audio;
 use crate::config::Config;
 use crate::controller::Status;
+use crate::install;
 use crate::logging;
 use crate::tray::{Tray, TrayEvent};
 
@@ -68,6 +71,12 @@ enum Message {
     Tick(Instant),
     Language(Language),
     Microphone(Microphone),
+    Autostart(bool),
+    Install,
+    /// Asks for confirmation first.
+    Uninstall,
+    UninstallConfirmed,
+    UninstallCancelled,
     OpenLogDir,
     CloseWindow,
     Quit,
@@ -79,6 +88,10 @@ struct App {
     config: Config,
     config_tx: watch::Sender<Config>,
     microphones: Vec<Microphone>,
+    install: install::State,
+    confirm_uninstall: bool,
+    /// Last failed install, uninstall or autostart change.
+    install_error: Option<String>,
     tray: Option<Tray>,
     /// Start and current frame of the busy bar animation.
     started: Instant,
@@ -104,6 +117,9 @@ impl App {
             config,
             config_tx,
             microphones: Vec::new(),
+            install: install::State::default(),
+            confirm_uninstall: false,
+            install_error: None,
             tray,
             started: Instant::now(),
             now: Instant::now(),
@@ -163,6 +179,28 @@ impl App {
                 self.config.microphone = microphone.0;
                 self.apply_config();
             }
+            Message::Autostart(enabled) => {
+                let result = install::set_autostart(enabled);
+                self.install = install::State::read();
+                self.report(result);
+            }
+            Message::Install => match install::install() {
+                // Continue as the installed copy.
+                Ok(path) => {
+                    install::relaunch_after_exit(&path);
+                    return iced::exit();
+                }
+                Err(err) => self.report(Err(err)),
+            },
+            Message::Uninstall => self.confirm_uninstall = true,
+            Message::UninstallCancelled => self.confirm_uninstall = false,
+            Message::UninstallConfirmed => {
+                self.confirm_uninstall = false;
+                match install::uninstall() {
+                    Ok(()) => return iced::exit(),
+                    Err(err) => self.report(Err(err)),
+                }
+            }
             Message::OpenLogDir => open_in_file_manager(&logging::log_dir()),
         }
         Task::none()
@@ -186,6 +224,9 @@ impl App {
                 pick_list(self.microphones.as_slice(), Some(microphone), Message::Microphone)
             ),
             setting("Shortcut", text(self.hotkey_hint())),
+            setting("Installation", self.installation()),
+            setting("Autostart", self.autostart()),
+            self.install_note(),
             space::vertical(),
             row![
                 button("Open log folder").on_press(Message::OpenLogDir),
@@ -221,6 +262,69 @@ impl App {
         ])
     }
 
+    /// Where the app runs from, with the button to install or uninstall it.
+    fn installation(&self) -> Element<'_, Message> {
+        let (info, action) = if self.confirm_uninstall {
+            (
+                "Uninstall Freisprech?".to_owned(),
+                row![
+                    button("Uninstall")
+                        .style(button::danger)
+                        .on_press(Message::UninstallConfirmed),
+                    button("Cancel").on_press(Message::UninstallCancelled),
+                ]
+                .spacing(10),
+            )
+        } else if self.install.running_installed {
+            (
+                format!("Installed in {}", home_relative(&self.install.running_from)),
+                row![button("Uninstall").on_press(Message::Uninstall)],
+            )
+        } else {
+            (
+                format!("Running from {}", home_relative(&self.install.running_from)),
+                row![button("Install").on_press(Message::Install)],
+            )
+        };
+        row![text(info).width(Length::Fill), action]
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .into()
+    }
+
+    /// Autostart always runs the installed copy, so it needs one.
+    fn autostart(&self) -> Element<'_, Message> {
+        let label = if self.install.can_autostart {
+            "Start at login"
+        } else {
+            "Start at login (install first)"
+        };
+        checkbox(self.install.autostart)
+            .label(label)
+            .on_toggle_maybe(self.install.can_autostart.then_some(Message::Autostart))
+            .into()
+    }
+
+    fn install_note(&self) -> Option<Element<'_, Message>> {
+        let note = if let Some(err) = &self.install_error {
+            err.clone()
+        } else if self.confirm_uninstall {
+            "Removes the app, its menu entry and autostart. The model, settings and logs stay \
+             (see README to remove them too)."
+                .to_owned()
+        } else {
+            return None;
+        };
+        Some(text(note).size(12).into())
+    }
+
+    fn report(&mut self, result: anyhow::Result<()>) {
+        self.install_error = result.err().map(|err| {
+            tracing::error!("{err:#}");
+            format!("{err:#}")
+        });
+    }
+
     /// Working on something that reports no progress of its own.
     fn busy(&self) -> bool {
         matches!(self.status, Status::Starting | Status::LoadingModel)
@@ -245,9 +349,12 @@ impl App {
         self.microphones = std::iter::once(Microphone(None))
             .chain(audio::input_devices().into_iter().map(|name| Microphone(Some(name))))
             .collect();
+        self.install = install::State::read();
+        self.confirm_uninstall = false;
+        self.install_error = None;
 
         let (id, open) = window::open(window::Settings {
-            size: Size::new(480.0, 380.0),
+            size: Size::new(520.0, 460.0),
             resizable: false,
             // Wayland does not tell apps about minimizing, so there is nothing to hide on.
             minimizable: cfg!(windows),
@@ -314,6 +421,15 @@ fn busy_bar<'a>(elapsed: Duration) -> Element<'a, Message> {
                 .border(border::rounded(2))
         })
         .into()
+}
+
+/// `~/…` for paths in the home folder, as Linux users know them.
+fn home_relative(path: &std::path::Path) -> String {
+    let home = dirs::home_dir().filter(|_| cfg!(target_os = "linux"));
+    match home.as_deref().and_then(|home| path.strip_prefix(home).ok()) {
+        Some(rest) => std::path::Path::new("~").join(rest).display().to_string(),
+        None => path.display().to_string(),
+    }
 }
 
 fn open_in_file_manager(dir: &std::path::Path) {
