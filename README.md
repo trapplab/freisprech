@@ -72,15 +72,15 @@ The `bundle-native` feature embeds the native libraries (86 MB) zstd-compressed 
 
 ## Release
 
-Bump the version in `Cargo.toml`, commit, and push a matching tag:
+Changes are listed in [`CHANGELOG.md`](CHANGELOG.md) under `Unreleased` as they are made. For a release, turn `Unreleased` into the new version, bump the version in `Cargo.toml`, commit, and push a matching tag:
 
 ```bash
 git tag 0.2.0 && git push origin 0.2.0
 ```
 
-Or let an agent do all of it: the skill [`bump-version`](.agents/skills/bump-version/SKILL.md) takes the version, updates `Cargo.toml` and `Cargo.lock`, verifies the build, commits, and pushes `main` and the tag.
+Or let an agent do all of it: the skill [`bump-version`](.agents/skills/bump-version/SKILL.md) takes the version, updates `Cargo.toml`, `Cargo.lock` and `CHANGELOG.md`, verifies the build, commits, and pushes `main` and the tag.
 
-The workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) then builds the Linux and Windows binaries and creates a GitHub release with `SHA256SUMS` and automatic release notes. It aborts if the tag does not match `Cargo.toml`. Tags with a suffix such as `0.2.0-rc1` are marked as pre-releases. The workflow can also be started manually under *Actions → Release → Run workflow*; it then only builds (results as artifacts) without creating a release.
+The workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) then builds the Linux and Windows binaries and creates a GitHub release with `SHA256SUMS`, using the version's section of `CHANGELOG.md` as release notes. It aborts if the tag does not match `Cargo.toml` or the changelog has no entries for it. Tags with a suffix such as `0.2.0-rc1` are marked as pre-releases. The workflow can also be started manually under *Actions → Release → Run workflow*; it then only builds (results as artifacts) without creating a release.
 
 ## Notes
 

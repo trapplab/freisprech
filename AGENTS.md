@@ -38,3 +38,6 @@ Only when asked:
 
 - Update `README.md` in the same change when usage, CLI options, requirements or build steps
   change
+- Add user-visible changes to `CHANGELOG.md` under `## [Unreleased]` in the same change
+  ([Keep a Changelog](https://keepachangelog.com): Added, Changed, Fixed, Removed …).
+  Releasing turns that section into the version (skill `bump-version`)

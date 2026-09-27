@@ -1,5 +1,6 @@
 # Pushing a tag like 0.2.0 builds the single-file binaries for Linux and Windows and
-# publishes them as a GitHub release. Started by hand, it only builds (artifacts, no release).
+# publishes them as a GitHub release, with the tag's section of CHANGELOG.md as notes.
+# Started by hand, it only builds (artifacts, no release).
 name: Release
 
 on:
@@ -23,6 +24,10 @@ jobs:
             echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml (version = \"$version\")"
             exit 1
           fi
+      # Checked before the long builds, so a missing entry fails fast.
+      - name: CHANGELOG.md has entries for the tag
+        if: github.ref_type == 'tag'
+        run: ./scripts/changelog-section.sh "$GITHUB_REF_NAME" > /dev/null
 
   linux:
     needs: version
@@ -60,6 +65,7 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -68,6 +74,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          notes="$RUNNER_TEMP/notes.md"
+          ./scripts/changelog-section.sh "$GITHUB_REF_NAME" > "$notes"
           cd dist
           chmod +x freisprech-linux-x86_64
           sha256sum freisprech-* > SHA256SUMS
@@ -76,4 +84,4 @@ jobs:
           gh release create "$GITHUB_REF_NAME" * \
             --repo "$GITHUB_REPOSITORY" \
             --title "Freisprech $GITHUB_REF_NAME" \
-            --generate-notes $prerelease
+            --notes-file "$notes" $prerelease
