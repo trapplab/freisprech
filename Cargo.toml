@@ -1,0 +1,43 @@
+[package]
+name = "freisprech"
+version = "0.1.0"
+edition = "2021"
+description = "Dictate into any app with local AI"
+repository = "https://github.com/trapplab/freisprech"
+
+[dependencies]
+anyhow = "1.0.104"
+clap = { version = "4.6.7", features = ["derive"] }
+cpal = "0.18.2"
+dirs = "7.0.0"
+foundry-local-sdk = "2.0.1"
+iced = { version = "0.14", default-features = false, features = ["tiny-skia", "wayland", "x11", "tokio", "crisp", "web-colors"] }
+rubato = "5.0.0"
+serde = { version = "1.0.229", features = ["derive"] }
+tokio = { version = "1.53.1", features = ["rt-multi-thread", "macros", "sync", "time", "signal"] }
+tokio-stream = "0.1.19"
+toml = "1.1.6"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+tracing-subscriber = { version = "0.3.23", features = ["env-filter"] }
+zstd = { version = "0.13", optional = true }
+
+[build-dependencies]
+zstd = { version = "0.13", optional = true }
+
+[features]
+# Embeds native/ into the executable, so a single file runs anywhere:
+# cargo build --release --features bundle-native
+bundle-native = ["dep:zstd"]
+
+# Wayland text input: RemoteDesktop portal + libei; tray via StatusNotifierItem
+[target.'cfg(target_os = "linux")'.dependencies]
+ksni = "0.3.6"
+ashpd = { version = "0.13", default-features = false, features = ["tokio", "remote_desktop", "screencast", "global_shortcuts"] }
+reis = { version = "0.7.1", features = ["tokio"] }
+rustix = { version = "1.1.5", default-features = false, features = ["std", "time"] }
+xkbcommon = { version = "0.9", default-features = false, features = ["wayland"] }
+
+[target."cfg(windows)".dependencies]
+tray-icon = { version = "0.25", default-features = false }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse", "Win32_UI_WindowsAndMessaging"] }

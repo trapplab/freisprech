@@ -1,0 +1,5 @@
+[env]
+# Native Foundry Local engine (foundry_local + ONNX Runtime + GenAI), fetched by
+# scripts/fetch-native-nightly.sh. Nightly until a release fixes streaming language
+# selection (microsoft/Foundry-Local#1064). On Windows: scripts/fetch-native-nightly.ps1.
+FOUNDRY_LOCAL_LIB_DIR = { value = "native", relative = true }

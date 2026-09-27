@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Freisprech
+Comment=Dictate into any app with local AI
+Exec=freisprech
+Icon=audio-input-microphone
+Terminal=false
+Categories=Utility;Accessibility;

@@ -1,0 +1,9 @@
+    Finished `release` profile [optimized] target(s) in 0.16s
+     Running `target/release/speech-assistant`
+Lade Modell nemotron-3.5-asr-streaming-0.6b …
+[2m2026-09-26T20:38:37.041036Z[0m [32m INFO[0m [2mspeech_assistant::asr[0m[2m:[0m Modell gefunden [3mid[0m[2m=[0m"nemotron-3.5-asr-streaming-0.6b-generic-cpu:3"
+[2m2026-09-26T20:38:38.833507Z[0m [32m INFO[0m [2mspeech_assistant::audio[0m[2m:[0m Mikrofon geöffnet [3mrate[0m[2m=[0m48000 [3mchannels[0m[2m=[0m2 [3mformat[0m[2m=[0mF32
+
+Sprich jetzt – Enter beendet das Diktat.
+
+

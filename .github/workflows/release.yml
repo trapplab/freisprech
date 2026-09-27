@@ -1,0 +1,79 @@
+# Pushing a tag like 0.2.0 builds the single-file binaries for Linux and Windows and
+# publishes them as a GitHub release. Started by hand, it only builds (artifacts, no release).
+name: Release
+
+on:
+  push:
+    tags: ["[0-9]*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tag passt zur Version in Cargo.toml
+        if: github.ref_type == 'tag'
+        run: |
+          version=$(grep -m1 '^version' Cargo.toml | cut -d'"' -f2)
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml (version = \"$version\")"
+            exit 1
+          fi
+
+  linux:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Same build as locally: Debian 12 container, so the binary needs only glibc 2.35.
+      - run: ./scripts/build-linux.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: dist/freisprech-linux-x86_64
+          if-no-files-found: error
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/fetch-native-nightly.ps1
+      - run: cargo build --release --locked --features bundle-native
+      - run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/release/freisprech.exe dist/freisprech-windows-x86_64.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/freisprech-windows-x86_64.exe
+          if-no-files-found: error
+
+  release:
+    if: github.ref_type == 'tag'
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release anlegen
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd dist
+          chmod +x freisprech-linux-x86_64
+          sha256sum freisprech-* > SHA256SUMS
+          # Tags with a suffix (0.2.0-rc1) become pre-releases.
+          prerelease=$([[ "$GITHUB_REF_NAME" == *-* ]] && echo --prerelease || true)
+          gh release create "$GITHUB_REF_NAME" * \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "Freisprech $GITHUB_REF_NAME" \
+            --generate-notes $prerelease
