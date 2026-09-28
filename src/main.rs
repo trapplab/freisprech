@@ -6,16 +6,18 @@ mod hotkey;
 mod install;
 #[cfg(target_os = "linux")]
 mod ipc;
+mod language;
 mod logging;
 mod tray;
 mod typer;
 mod ui;
 
-use std::io::Write;
+use std::fs::File;
+use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::Parser;
 use tokio::sync::{mpsc, watch};
 
@@ -51,6 +53,16 @@ struct Cli {
     #[arg(long)]
     realtime: bool,
 
+    /// Test: dictate from the microphone until Enter, print the text instead of typing it,
+    /// and save the audio as the model received it (format as for --file)
+    #[arg(long, value_name = "FILE")]
+    record: Option<PathBuf>,
+
+    /// With --file or --record: language instead of the setting, e.g. `en`, `de-DE`,
+    /// `auto` (detect from speech) or `system` (system language)
+    #[arg(long, value_name = "CODE")]
+    language: Option<String>,
+
     /// Test: only type this text, without speech recognition
     #[arg(long, value_name = "TEXT")]
     type_text: Option<String>,
@@ -72,7 +84,7 @@ fn main() -> Result<()> {
 
     let result = if cli.uninstall {
         uninstall()
-    } else if cli.file.is_some() || cli.type_text.is_some() {
+    } else if cli.file.is_some() || cli.record.is_some() || cli.type_text.is_some() {
         tokio::runtime::Runtime::new()?.block_on(run_test_mode(&cli))
     } else {
         run_app(cli.settings)
@@ -125,10 +137,18 @@ fn uninstall() -> Result<()> {
 }
 
 async fn run_test_mode(cli: &Cli) -> Result<()> {
-    let language = Config::load().language;
-    if let Some(path) = &cli.file {
+    let config = Config::load();
+    let language = language::resolve(cli.language.as_deref().unwrap_or(&config.language));
+    if cli.file.is_some() || cli.record.is_some() {
+        tracing::info!(language, "Language");
         let engine = AsrEngine::load(asr::DEFAULT_MODEL, |_| {}).await?;
-        println!("{}", transcribe_file(&engine, &language, path, cli.realtime).await?);
+        if let Some(path) = &cli.file {
+            println!("{}", transcribe_file(&engine, &language, path, cli.realtime).await?);
+        }
+        if let Some(path) = &cli.record {
+            let microphone = config.microphone.as_deref();
+            println!("{}", record(&engine, &language, microphone, path).await?);
+        }
     }
     if let Some(text) = &cli.type_text {
         #[cfg(target_os = "linux")]
@@ -160,6 +180,51 @@ async fn transcribe_file(
         }
     }
     dictation.finish().await
+}
+
+/// Dictates from the microphone until Enter, showing the text as it is recognized, and
+/// saves the audio that went into the model.
+async fn record(
+    engine: &AsrEngine,
+    language: &str,
+    microphone: Option<&str>,
+    path: &Path,
+) -> Result<String> {
+    let file = File::create(path).with_context(|| format!("Cannot create {}", path.display()))?;
+    let mut file = BufWriter::new(file);
+    let mut dictation = engine.start_dictation(Some(language)).await?;
+    let input = dictation.input();
+    let (pcm_tx, mut pcm_rx) = mpsc::channel::<Vec<i16>>(32);
+    let pump = tokio::spawn(async move {
+        while let Some(chunk) = pcm_rx.recv().await {
+            input.push(&chunk)?;
+            let bytes: Vec<u8> = chunk.iter().flat_map(|s| s.to_le_bytes()).collect();
+            file.write_all(&bytes)?;
+        }
+        file.flush()?;
+        anyhow::Ok(())
+    });
+    let mic = audio::Microphone::start(microphone, pcm_tx)?;
+
+    eprintln!("Recording – press Enter to stop");
+    let mut enter = tokio::task::spawn_blocking(|| std::io::stdin().read_line(&mut String::new()));
+    loop {
+        tokio::select! {
+            _ = &mut enter => break,
+            piece = dictation.next() => match piece {
+                Some(piece) => {
+                    eprint!("{}", piece?);
+                    let _ = std::io::stderr().flush();
+                }
+                None => break,
+            },
+        }
+    }
+    mic.stop();
+    pump.await??;
+    let text = dictation.finish().await?;
+    eprintln!("\nSaved to {}", path.display());
+    Ok(text)
 }
 
 async fn countdown(seconds: u64) {

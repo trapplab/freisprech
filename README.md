@@ -14,6 +14,8 @@ Local dictation assistant for Linux and Windows. **Ctrl+Alt+D** starts and stops
    - The model (about 760 MB) is downloaded once. Progress is shown in the tray tooltip, the settings window and the console.
 3. **Ctrl+Alt+D** starts dictation, pressing **Ctrl+Alt+D** again stops it.
 
+The language is detected from speech, so you can switch languages while dictating. In the settings you can fix it to one language or to the *System language* (Linux `LANG`, Windows regional format); a fixed language only recognizes that language.
+
 Settings (language, microphone) are available from the tray icon, and on Linux also by starting the program a second time or from the app menu. Quit via the tray menu, or without a tray via the button in the settings window.
 
 ### Install, autostart, uninstall
@@ -32,6 +34,8 @@ Everything goes into the user's home folder, no admin rights needed.
 | `--uninstall` | Uninstall like the button in the settings (on Linux, quit the running app first) |
 | `--toggle` | Linux only: start/stop dictation in the running instance (fallback if the desktop offers no global shortcut) |
 | `--file <pcm>` | Test: transcribe a file (16 kHz, mono, s16le) |
+| `--record <pcm>` | Test: dictate until Enter, print the text and save the audio as the model received it, for `--file` |
+| `--language <code>` | With `--file` or `--record`: language instead of the setting, e.g. `en`, `de-DE`, `auto`, `system` |
 | `--type-text <text>` | Test: type text without speech recognition |
 
 ## System requirements

@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `--record <file>`: dictate and save the audio for `--file`.
+- `--language <code>` for `--file` and `--record`.
+- *System language* as an option in the language setting.
+- Microphone levels in the log.
+
+### Changed
+
+- Quiet microphones are amplified.
+- Silent channels are no longer mixed in.
+
+### Fixed
+
+- The end of the last word was cut off when stopping.
+
 ## [0.1.1] - 2026-09-27
 
 ### Added

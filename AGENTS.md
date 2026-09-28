@@ -18,7 +18,7 @@ side, check both targets.
 Check speech recognition (downloads the model on first run, about 760 MB):
 
 ```sh
-cargo run --locked -- --file tests/fixtures/jfk.pcm
+cargo run --locked -- --file tests/fixtures/jfk.pcm --language en
 ```
 
 The output must match the expected text in `tests/fixtures/README.md` (punctuation may differ).
@@ -41,3 +41,4 @@ Only when asked:
 - Add user-visible changes to `CHANGELOG.md` under `## [Unreleased]` in the same change
   ([Keep a Changelog](https://keepachangelog.com): Added, Changed, Fixed, Removed …).
   Releasing turns that section into the version (skill `bump-version`)
+- Keep the changelog messages short and avoid beeing too verbose

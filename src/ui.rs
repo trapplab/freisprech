@@ -19,6 +19,7 @@ use crate::audio;
 use crate::config::Config;
 use crate::controller::Status;
 use crate::install;
+use crate::language;
 use crate::logging;
 use crate::tray::{Tray, TrayEvent};
 
@@ -453,7 +454,8 @@ impl fmt::Display for Language {
 
 /// A selection of the model's languages; codes as understood by Foundry Local.
 const LANGUAGES: &[Language] = &[
-    Language { code: "auto", name: "Detect automatically" },
+    Language { code: language::DETECT, name: "Detect from speech" },
+    Language { code: language::SYSTEM, name: "System language" },
     Language { code: "de", name: "German" },
     Language { code: "en", name: "English" },
     Language { code: "fr", name: "French" },

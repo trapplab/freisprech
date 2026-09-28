@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Config {
-    /// Language hint for the ASR, e.g. "de", or "auto".
+    /// Language hint for the ASR, e.g. "de"; "auto" = detect from speech, "system" = system language.
     pub language: String,
     /// Input device name; `None` = system default.
     pub microphone: Option<String>,
@@ -17,7 +17,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            language: "auto".into(),
+            language: crate::language::DETECT.into(),
             microphone: None,
         }
     }

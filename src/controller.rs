@@ -13,6 +13,7 @@ use crate::asr::{self, AsrEngine, Dictation};
 use crate::audio;
 use crate::config::Config;
 use crate::hotkey::{Hotkey, HotkeyEvent};
+use crate::language;
 use crate::typer::Typer;
 
 #[cfg(target_os = "linux")]
@@ -169,8 +170,9 @@ async fn dictate(
     typer: &mut Typer,
     hotkey: &mut Hotkey,
 ) -> Result<()> {
-    tracing::info!(language = settings.language, "Dictation started");
-    let mut dictation = engine.start_dictation(Some(&settings.language)).await?;
+    let language = language::resolve(&settings.language);
+    tracing::info!(setting = settings.language, language, "Dictation started");
+    let mut dictation = engine.start_dictation(Some(&language)).await?;
     let (mic, pump) = start_microphone(&dictation, settings.microphone.as_deref())?;
     let mut out = LiveOutput::new(typer);
 
@@ -192,7 +194,7 @@ async fn dictate(
 
     // Stopping: close the microphone, then type what the model still has buffered.
     out.hold();
-    drop(mic);
+    mic.stop();
     pump.await?;
     dictation.end_audio();
     loop {
@@ -282,7 +284,7 @@ impl<'a> LiveOutput<'a> {
 }
 
 /// Opens the microphone and forwards its audio into the dictation.
-/// Dropping the returned microphone ends the pump task.
+/// Stopping or dropping the returned microphone ends the pump task.
 fn start_microphone(
     dictation: &Dictation,
     device: Option<&str>,
