@@ -34,6 +34,11 @@ Only when asked:
 - No new dependencies without asking
 - Keep versions in `scripts/fetch-native-nightly.sh` and `.ps1` in sync
 
+## Git
+
+- Don't commit, tag or push on your own; the developer does that. Leave changes in the
+  working tree
+
 ## Documentation
 
 - Update `README.md` in the same change when usage, CLI options, requirements or build steps
