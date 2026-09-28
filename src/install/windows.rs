@@ -24,8 +24,8 @@ pub fn install_path() -> Result<PathBuf> {
 }
 
 /// Start menu shortcut, and an entry under "Installed apps" whose uninstall runs
-/// `freisprech.exe --uninstall`.
-pub fn add_menu_entry(exe: &Path) -> Result<()> {
+/// `freisprech.exe --uninstall`. `version` is shown there.
+pub fn add_menu_entry(exe: &Path, version: &str) -> Result<()> {
     let script = format!(
         "$s = (New-Object -ComObject WScript.Shell).CreateShortcut({}); \
          $s.TargetPath = {}; $s.Arguments = '--settings'; $s.Save()",
@@ -40,7 +40,7 @@ pub fn add_menu_entry(exe: &Path) -> Result<()> {
     let folder = exe.parent().context("Install path has no folder")?.display().to_string();
     for (name, value) in [
         ("DisplayName", "Freisprech"),
-        ("DisplayVersion", env!("CARGO_PKG_VERSION")),
+        ("DisplayVersion", version),
         ("DisplayIcon", &path),
         ("InstallLocation", &folder),
         ("UninstallString", &format!("{quoted} --uninstall")),

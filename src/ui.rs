@@ -22,6 +22,7 @@ use crate::install;
 use crate::language;
 use crate::logging;
 use crate::tray::{Tray, TrayEvent};
+use crate::update;
 
 #[cfg(target_os = "linux")]
 const HOTKEY_HINT: &str = "Ctrl+Alt+D (can be changed in the desktop's keyboard settings)";
@@ -78,6 +79,12 @@ enum Message {
     Uninstall,
     UninstallConfirmed,
     UninstallCancelled,
+    CheckUpdate,
+    UpdateChecked(Result<Option<update::Release>, String>),
+    ReleaseNotes,
+    Update,
+    /// The installed path of the new version.
+    Updated(Result<std::path::PathBuf, String>),
     OpenLogDir,
     CloseWindow,
     Quit,
@@ -91,7 +98,8 @@ struct App {
     microphones: Vec<Microphone>,
     install: install::State,
     confirm_uninstall: bool,
-    /// Last failed install, uninstall or autostart change.
+    update: UpdateState,
+    /// Last failed install, uninstall, autostart change or update.
     install_error: Option<String>,
     tray: Option<Tray>,
     /// Start and current frame of the busy bar animation.
@@ -120,6 +128,7 @@ impl App {
             microphones: Vec::new(),
             install: install::State::default(),
             confirm_uninstall: false,
+            update: UpdateState::Unchecked,
             install_error: None,
             tray,
             started: Instant::now(),
@@ -202,7 +211,43 @@ impl App {
                     Err(err) => self.report(Err(err)),
                 }
             }
-            Message::OpenLogDir => open_in_file_manager(&logging::log_dir()),
+            Message::CheckUpdate => {
+                self.update = UpdateState::Checking;
+                self.install_error = None;
+                return Task::perform(update::check(), |result| {
+                    Message::UpdateChecked(result.map_err(|err| format!("{err:#}")))
+                });
+            }
+            Message::UpdateChecked(Ok(Some(release))) => {
+                self.update = UpdateState::Available(release)
+            }
+            Message::UpdateChecked(Ok(None)) => self.update = UpdateState::Latest,
+            Message::ReleaseNotes => {
+                if let UpdateState::Available(release) = &self.update {
+                    open(&release.page);
+                }
+            }
+            Message::Update => {
+                if let UpdateState::Available(release) = &self.update {
+                    let release = release.clone();
+                    self.update = UpdateState::Downloading(release.version.clone());
+                    self.install_error = None;
+                    return Task::perform(update::install(release), |result| {
+                        Message::Updated(result.map_err(|err| format!("{err:#}")))
+                    });
+                }
+            }
+            // Continue as the new version, like after installing.
+            Message::Updated(Ok(path)) => {
+                install::relaunch_after_exit(&path);
+                return iced::exit();
+            }
+            Message::UpdateChecked(Err(err)) | Message::Updated(Err(err)) => {
+                tracing::error!("{err}");
+                self.update = UpdateState::Unchecked;
+                self.install_error = Some(err);
+            }
+            Message::OpenLogDir => open(logging::log_dir()),
         }
         Task::none()
     }
@@ -227,6 +272,7 @@ impl App {
             setting("Shortcut", text(self.hotkey_hint())),
             setting("Installation", self.installation()),
             setting("Autostart", self.autostart()),
+            setting("Version", self.version()),
             self.install_note(),
             space::vertical(),
             row![
@@ -306,6 +352,38 @@ impl App {
             .into()
     }
 
+    /// The running version, with the buttons to check for and install a newer one.
+    fn version(&self) -> Element<'_, Message> {
+        let current = env!("CARGO_PKG_VERSION");
+        let (info, action): (String, Element<'_, Message>) = match &self.update {
+            UpdateState::Unchecked => (
+                current.to_owned(),
+                button("Check for updates").on_press(Message::CheckUpdate).into(),
+            ),
+            UpdateState::Checking => (current.to_owned(), button("Checking …").into()),
+            UpdateState::Latest => (
+                format!("{current} is the latest"),
+                button("Check again").on_press(Message::CheckUpdate).into(),
+            ),
+            UpdateState::Available(release) => (
+                format!("{} available", release.version),
+                row![
+                    button("What's new").on_press(Message::ReleaseNotes),
+                    button("Update").style(button::success).on_press(Message::Update),
+                ]
+                .spacing(10)
+                .into(),
+            ),
+            UpdateState::Downloading(version) => {
+                (format!("Downloading {version} …"), button("Update").into())
+            }
+        };
+        row![text(info).width(Length::Fill), action]
+            .spacing(10)
+            .align_y(Alignment::Center)
+            .into()
+    }
+
     fn install_note(&self) -> Option<Element<'_, Message>> {
         let note = if let Some(err) = &self.install_error {
             err.clone()
@@ -355,7 +433,7 @@ impl App {
         self.install_error = None;
 
         let (id, open) = window::open(window::Settings {
-            size: Size::new(520.0, 460.0),
+            size: Size::new(520.0, 500.0),
             resizable: false,
             // Wayland does not tell apps about minimizing, so there is nothing to hide on.
             minimizable: cfg!(windows),
@@ -433,11 +511,23 @@ fn home_relative(path: &std::path::Path) -> String {
     }
 }
 
-fn open_in_file_manager(dir: &std::path::Path) {
+/// Opens a folder in the file manager or a web page in the browser.
+fn open(target: impl AsRef<std::ffi::OsStr>) {
     let program = if cfg!(windows) { "explorer" } else { "xdg-open" };
-    if let Err(err) = std::process::Command::new(program).arg(dir).spawn() {
-        tracing::error!(%err, "Failed to open folder");
+    if let Err(err) = std::process::Command::new(program).arg(target).spawn() {
+        tracing::error!(%err, "Failed to open folder or web page");
     }
+}
+
+/// Where the update check in the settings stands. Failures show as `install_error`.
+#[derive(Debug, Clone)]
+enum UpdateState {
+    Unchecked,
+    Checking,
+    Latest,
+    Available(update::Release),
+    /// Downloading and installing this version.
+    Downloading(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

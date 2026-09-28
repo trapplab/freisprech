@@ -28,7 +28,7 @@ pub async fn register_app() -> Result<()> {
         .ok()
         .filter(|path| path.is_file())
         .map_or_else(std::env::current_exe, Ok)?;
-    if let Err(err) = add_menu_entry(&exe) {
+    if let Err(err) = add_menu_entry(&exe, env!("CARGO_PKG_VERSION")) {
         tracing::warn!("Failed to write desktop entry: {err:#}");
     }
     // The portal picks up a newly written desktop entry only after a moment; until then
@@ -48,8 +48,8 @@ pub async fn register_app() -> Result<()> {
 }
 
 /// Launching the entry from the app menu opens the settings (of the running instance,
-/// if there is one).
-pub fn add_menu_entry(exe: &Path) -> Result<()> {
+/// if there is one). The version is only shown on Windows.
+pub fn add_menu_entry(exe: &Path, _version: &str) -> Result<()> {
     write_if_changed(&menu_entry_path()?, &desktop_entry(exe, &["--settings"]))
 }
 

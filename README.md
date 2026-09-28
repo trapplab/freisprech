@@ -22,7 +22,8 @@ Settings (language, microphone) are available from the tray icon, and on Linux a
 
 The downloaded file runs from wherever it is, no installer needed. To keep it:
 
-- **Install** in the settings copies the app to a fixed location, adds it to the app menu and restarts it from there. Installing a newer download the same way updates it.
+- **Install** in the settings copies the app to a fixed location, adds it to the app menu and restarts it from there.
+- **Check for updates** in the settings looks for a newer release on GitHub. **Update** downloads it, replaces the installed copy (installs it if there is none) and restarts the app. To update by hand instead, quit the running app first, then start the new download and click **Install**.
 - **Start at login** starts the installed copy in the tray at login. It is only available once installed.
 - **Uninstall** in the settings of the installed copy removes the app, its menu entry, autostart and the unpacked native libraries. The model, settings and logs stay; see [Files](#files) to remove them too. On Windows the app can also be removed under *Settings → Apps → Installed apps*.
 

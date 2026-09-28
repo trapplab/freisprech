@@ -11,6 +11,7 @@ mod logging;
 mod tray;
 mod typer;
 mod ui;
+mod update;
 
 use std::fs::File;
 use std::io::{BufWriter, Write};

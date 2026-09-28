@@ -62,17 +62,53 @@ pub fn install() -> Result<PathBuf> {
     let exe = std::env::current_exe()?;
     let target = install_path()?;
     if !same_file(&exe, &target) {
-        std::fs::create_dir_all(target.parent().context("Install path has no folder")?)?;
-        // Copy beside and rename, so an interrupted copy never leaves a broken app.
-        let tmp = target.with_extension("part");
+        let tmp = part_path(&target)?;
         std::fs::copy(&exe, &tmp)
             .with_context(|| format!("Failed to copy the app to {}", tmp.display()))?;
-        std::fs::rename(&tmp, &target)
-            .with_context(|| format!("Failed to replace {}", target.display()))?;
+        replace(&tmp, &target)?;
     }
-    platform::add_menu_entry(&target)?;
+    platform::add_menu_entry(&target, env!("CARGO_PKG_VERSION"))?;
     tracing::info!(path = %target.display(), "Installed");
     Ok(target)
+}
+
+/// Installs a downloaded executable of `version` like [`install`], also over the running
+/// installed copy. Returns the installed path.
+pub fn install_update(data: &[u8], version: &str) -> Result<PathBuf> {
+    let target = install_path()?;
+    let tmp = part_path(&target)?;
+    std::fs::write(&tmp, data)
+        .with_context(|| format!("Failed to write the update to {}", tmp.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755))?;
+    }
+    replace(&tmp, &target)?;
+    platform::add_menu_entry(&target, version)?;
+    tracing::info!(version, path = %target.display(), "Updated");
+    Ok(target)
+}
+
+/// Where a new executable goes before it replaces the installed one: written beside and
+/// renamed, an interrupted copy never leaves a broken app.
+fn part_path(target: &Path) -> Result<PathBuf> {
+    std::fs::create_dir_all(target.parent().context("Install path has no folder")?)?;
+    Ok(target.with_extension("part"))
+}
+
+/// Moves `tmp` to `target`. Windows cannot overwrite a running executable but can rename
+/// it, so the old one moves aside and is deleted by the next update or uninstall.
+fn replace(tmp: &Path, target: &Path) -> Result<()> {
+    #[cfg(windows)]
+    if target.is_file() {
+        let old = target.with_extension("old");
+        let _ = std::fs::remove_file(&old);
+        std::fs::rename(target, &old)
+            .with_context(|| format!("Failed to move {} aside", target.display()))?;
+    }
+    std::fs::rename(tmp, target)
+        .with_context(|| format!("Failed to replace {}", target.display()))
 }
 
 /// Removes the installed copy, its menu entry, autostart and the unpacked native engine.
