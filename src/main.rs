@@ -8,6 +8,7 @@ mod install;
 mod ipc;
 mod language;
 mod logging;
+mod rewrite;
 mod tray;
 mod typer;
 mod ui;
@@ -24,6 +25,7 @@ use tokio::sync::{mpsc, watch};
 
 use asr::AsrEngine;
 use config::Config;
+use rewrite::Rewriter;
 use typer::Typer;
 
 /// Local dictation assistant: Ctrl+Alt+D starts/stops, speech is typed live.
@@ -143,12 +145,15 @@ async fn run_test_mode(cli: &Cli) -> Result<()> {
     if cli.file.is_some() || cli.record.is_some() {
         tracing::info!(language, "Language");
         let engine = AsrEngine::load(asr::DEFAULT_MODEL, |_| {}).await?;
+        let rewriter = || Rewriter::new(&language, &config);
         if let Some(path) = &cli.file {
-            println!("{}", transcribe_file(&engine, &language, path, cli.realtime).await?);
+            let text = transcribe_file(&engine, &language, path, cli.realtime).await?;
+            println!("{}", rewriter().apply(&text));
         }
         if let Some(path) = &cli.record {
             let microphone = config.microphone.as_deref();
-            println!("{}", record(&engine, &language, microphone, path).await?);
+            let text = record(&engine, &language, microphone, path).await?;
+            println!("{}", rewriter().apply(&text));
         }
     }
     if let Some(text) = &cli.type_text {

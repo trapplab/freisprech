@@ -16,7 +16,34 @@ Local dictation assistant for Linux and Windows. **Ctrl+Alt+D** starts and stops
 
 The language is detected from speech, so you can switch languages while dictating. In the settings you can fix it to one language or to the *System language* (Linux `LANG`, Windows regional format); a fixed language only recognizes that language.
 
-Settings (language, microphone) are available from the tray icon, and on Linux also by starting the program a second time or from the app menu. Quit via the tray menu, or without a tray via the button in the settings window.
+Settings (language, microphone, voice commands, vocabulary) are available from the tray icon, and on Linux also by starting the program a second time or from the app menu. Quit via the tray menu, or without a tray via the button in the settings window.
+
+### Voice commands
+
+These commands are set up for English and German:
+
+| Say | Types |
+|---|---|
+| "new line", "neue Zeile" | line break (Enter) |
+| "new paragraph", "neuer Absatz" | empty line |
+| "full stop", "period", "Punkt" | `.` |
+| "comma", "Komma" | `,` |
+| "question mark", "Fragezeichen" | `?` |
+| "exclamation mark", "exclamation point", "Ausrufezeichen" | `!` |
+| "colon", "Doppelpunkt" | `:` |
+| "semicolon", "Semikolon" | `;` |
+
+A command replaces the punctuation the model added itself. After a line break or `.` `?` `!`, the next word starts with a capital letter. Commands also trigger when you mean the word itself ("an important Punkt").
+
+In the settings you can turn commands off, change, add or delete them, and add columns for more languages. What a command types decides how it behaves: `\n` is a line break, punctuation (`. , ; : ! ? …`) attaches to the previous word, anything else is typed as a word. With a fixed language only its column is active; when detecting from speech, all are. *Reset to defaults* brings back the table above.
+
+### Vocabulary
+
+The model can't learn new words, but Freisprech can replace words the model consistently gets wrong, for example English technical terms in German dictation. In the settings, add the word as it should be typed and, next to it, each way the model writes it (*+* adds another). The vocabulary applies whatever the language.
+
+Only whole words match; case and punctuation are ignored. To find out what the model writes for a word, dictate it with `--record`: the text shown while recording comes before any replacement.
+
+Changes in the settings apply to the next dictation right away and are saved when the settings window closes; empty rows and fields are dropped then.
 
 ### Install, autostart, uninstall
 
@@ -34,7 +61,7 @@ Everything goes into the user's home folder, no admin rights needed.
 | `--settings` | Open the settings window on start |
 | `--uninstall` | Uninstall like the button in the settings (on Linux, quit the running app first) |
 | `--toggle` | Linux only: start/stop dictation in the running instance (fallback if the desktop offers no global shortcut) |
-| `--file <pcm>` | Test: transcribe a file (16 kHz, mono, s16le) |
+| `--file <pcm>` | Test: transcribe a file (16 kHz, mono, s16le), with voice commands and vocabulary applied |
 | `--record <pcm>` | Test: dictate until Enter, print the text and save the audio as the model received it, for `--file` |
 | `--language <code>` | With `--file` or `--record`: language instead of the setting, e.g. `en`, `de-DE`, `auto`, `system` |
 | `--type-text <text>` | Test: type text without speech recognition |

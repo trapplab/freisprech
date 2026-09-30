@@ -9,14 +9,18 @@ use std::time::Duration;
 use iced::keyboard::{self, key};
 use iced::time::Instant;
 use iced::widget::{
-    button, checkbox, column, container, pick_list, progress_bar, row, rule, space, text,
+    button, checkbox, column, container, pick_list, progress_bar, row, rule, scrollable, space,
+    text, text_input,
 };
-use iced::{border, window, Alignment, Element, Length, Size, Subscription, Task, Theme};
+use iced::{
+    border, font, widget, window, Alignment, Element, Font, Length, Padding, Size, Subscription, Task,
+    Theme,
+};
 use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::audio;
-use crate::config::Config;
+use crate::config::{Config, Replacement, VoiceCommand};
 use crate::controller::Status;
 use crate::install;
 use crate::language;
@@ -29,6 +33,15 @@ const HOTKEY_HINT: &str = "Ctrl+Alt+D (can be changed in the desktop's keyboard 
 #[cfg(not(target_os = "linux"))]
 const HOTKEY_HINT: &str = "Ctrl+Alt+D";
 
+const SIDEBAR_WIDTH: f32 = 190.0;
+/// Column widths of the voice command table: what gets typed, what to say.
+const COMMAND_WIDTH: f32 = 100.0;
+const PHRASE_WIDTH: f32 = 180.0;
+/// Width of a word in the vocabulary table.
+const WORD_WIDTH: f32 = 150.0;
+/// Width of the "×" buttons that delete a row or column.
+const REMOVE_WIDTH: f32 = 26.0;
+const TABLE_SPACING: f32 = 6.0;
 /// Thickness of the progress bars.
 const BAR_GIRTH: f32 = 6.0;
 /// One sweep of the busy bar, there and back.
@@ -71,8 +84,25 @@ enum Message {
     Key(keyboard::Event),
     /// Animation frame of the busy bar.
     Tick(Instant),
+    Page(Page),
     Language(Language),
     Microphone(Microphone),
+    VoiceCommands(bool),
+    CommandOutput(usize, String),
+    /// Command, language code, phrases.
+    CommandPhrase(usize, String, String),
+    AddCommand,
+    RemoveCommand(usize),
+    AddCommandLanguage(Language),
+    RemoveCommandLanguage(String),
+    ResetCommands,
+    /// Word, what to type.
+    VocabularyWritten(usize, String),
+    /// Word, variant, how the model writes it.
+    VocabularyHeard(usize, usize, String),
+    AddHeard(usize),
+    AddWord,
+    RemoveWord(usize),
     Autostart(bool),
     Install,
     /// Asks for confirmation first.
@@ -92,10 +122,13 @@ enum Message {
 
 struct App {
     window: Option<window::Id>,
+    page: Page,
     status: Status,
     config: Config,
     config_tx: watch::Sender<Config>,
     microphones: Vec<Microphone>,
+    /// Text edits reached the dictation but not the settings file yet.
+    unsaved: bool,
     install: install::State,
     confirm_uninstall: bool,
     update: UpdateState,
@@ -122,8 +155,10 @@ impl App {
 
         let mut app = Self {
             window: None,
+            page: Page::General,
             status: Status::Starting,
             config,
+            unsaved: false,
             config_tx,
             microphones: Vec::new(),
             install: install::State::default(),
@@ -158,11 +193,12 @@ impl App {
                 self.status = status;
             }
             Message::Tray(TrayEvent::OpenSettings) => return self.open_settings(),
-            Message::Tray(TrayEvent::Quit) | Message::Quit => return iced::exit(),
+            Message::Tray(TrayEvent::Quit) | Message::Quit => return self.exit(),
             Message::CloseRequested(id) => return window::close(id),
             Message::WindowClosed(id) => {
                 if self.window == Some(id) {
                     self.window = None;
+                    self.tidy_and_save_config();
                 }
             }
             // Windows reports a minimized window as zero-sized: hide it like KeePass does.
@@ -181,6 +217,7 @@ impl App {
             }
             Message::Key(_) => {}
             Message::Tick(now) => self.now = now,
+            Message::Page(page) => self.page = page,
             Message::Language(language) => {
                 self.config.language = language.code.to_owned();
                 self.apply_config();
@@ -188,6 +225,88 @@ impl App {
             Message::Microphone(microphone) => {
                 self.config.microphone = microphone.0;
                 self.apply_config();
+            }
+            Message::VoiceCommands(enabled) => {
+                self.config.voice_commands = enabled;
+                self.apply_config();
+            }
+            Message::CommandOutput(index, output) => {
+                if let Some(command) = self.config.commands.get_mut(index) {
+                    command.output = output.replace("\\n", "\n");
+                    self.edit_config();
+                }
+            }
+            Message::CommandPhrase(index, language, phrase) => {
+                if let Some(command) = self.config.commands.get_mut(index) {
+                    if phrase.is_empty() {
+                        command.phrases.remove(&language);
+                    } else {
+                        command.phrases.insert(language, phrase);
+                    }
+                    self.edit_config();
+                }
+            }
+            Message::AddCommand => {
+                self.config.commands.push(VoiceCommand::default());
+                self.edit_config();
+                return widget::operation::focus(command_id(self.config.commands.len() - 1));
+            }
+            Message::RemoveCommand(index) => {
+                if index < self.config.commands.len() {
+                    self.config.commands.remove(index);
+                    self.apply_config();
+                }
+            }
+            Message::AddCommandLanguage(language) => {
+                self.config.command_languages.push(language.code.to_owned());
+                self.apply_config();
+            }
+            Message::RemoveCommandLanguage(language) => {
+                self.config.command_languages.retain(|l| *l != language);
+                for command in &mut self.config.commands {
+                    command.phrases.remove(&language);
+                }
+                self.apply_config();
+            }
+            Message::ResetCommands => {
+                self.config.commands = VoiceCommand::defaults();
+                self.config.command_languages = VoiceCommand::default_languages();
+                self.apply_config();
+            }
+            Message::VocabularyWritten(index, written) => {
+                if let Some(word) = self.config.vocabulary.get_mut(index) {
+                    word.written = written;
+                    self.edit_config();
+                }
+            }
+            Message::VocabularyHeard(index, variant, heard) => {
+                let word = self.config.vocabulary.get_mut(index);
+                if let Some(slot) = word.and_then(|w| w.heard.get_mut(variant)) {
+                    *slot = heard;
+                    self.edit_config();
+                }
+            }
+            Message::AddHeard(index) => {
+                if let Some(word) = self.config.vocabulary.get_mut(index) {
+                    word.heard.push(String::new());
+                    let variant = word.heard.len() - 1;
+                    self.edit_config();
+                    return widget::operation::focus(heard_id(index, variant));
+                }
+            }
+            Message::AddWord => {
+                self.config.vocabulary.push(Replacement {
+                    written: String::new(),
+                    heard: vec![String::new()],
+                });
+                self.edit_config();
+                return widget::operation::focus(word_id(self.config.vocabulary.len() - 1));
+            }
+            Message::RemoveWord(index) => {
+                if index < self.config.vocabulary.len() {
+                    self.config.vocabulary.remove(index);
+                    self.apply_config();
+                }
             }
             Message::Autostart(enabled) => {
                 let result = install::set_autostart(enabled);
@@ -198,7 +317,7 @@ impl App {
                 // Continue as the installed copy.
                 Ok(path) => {
                     install::relaunch_after_exit(&path);
-                    return iced::exit();
+                    return self.exit();
                 }
                 Err(err) => self.report(Err(err)),
             },
@@ -207,7 +326,7 @@ impl App {
             Message::UninstallConfirmed => {
                 self.confirm_uninstall = false;
                 match install::uninstall() {
-                    Ok(()) => return iced::exit(),
+                    Ok(()) => return self.exit(),
                     Err(err) => self.report(Err(err)),
                 }
             }
@@ -253,35 +372,33 @@ impl App {
     }
 
     fn view(&self, _window: window::Id) -> Element<'_, Message> {
-        let language = LANGUAGES
-            .iter()
-            .find(|l| l.code == self.config.language)
-            .copied();
-        let microphone = Microphone(self.config.microphone.clone());
+        let pages = Page::ALL.map(|page| {
+            button(text(page.title()))
+                .width(Length::Fill)
+                .style(if page == self.page { button::primary } else { button::text })
+                .on_press(Message::Page(page))
+                .into()
+        });
+        let sidebar = container(
+            column![text("Freisprech").size(22), space().height(10)]
+                .extend(pages)
+                .spacing(4),
+        )
+        .width(SIDEBAR_WIDTH)
+        .height(Length::Fill)
+        .padding(12)
+        .style(|theme: &Theme| container::background(theme.extended_palette().background.weak.color));
 
-        column![
-            text("Freisprech").size(22),
+        let content = column![
             text(self.status.describe()),
             self.progress(),
             rule::horizontal(1),
-            setting("Language", pick_list(LANGUAGES, language, Message::Language)),
-            setting(
-                "Microphone",
-                pick_list(self.microphones.as_slice(), Some(microphone), Message::Microphone)
-            ),
-            setting("Shortcut", text(self.hotkey_hint())),
-            setting("Installation", self.installation()),
-            setting("Autostart", self.autostart()),
-            setting("Version", self.version()),
-            self.install_note(),
-            space::vertical(),
-            row![
-                button("Open log folder").on_press(Message::OpenLogDir),
-                space::horizontal(),
-            ]
-            .push(self.tray.is_none().then(|| button("Quit").on_press(Message::Quit)))
-            .push(button("Close").on_press(Message::CloseWindow))
-            .spacing(10),
+            // Room for the scrollbar next to the page.
+            scrollable(container(self.page()).padding(Padding::ZERO.right(14))).height(Length::Fill),
+            row![space::horizontal()]
+                .push(self.tray.is_none().then(|| button("Quit").on_press(Message::Quit)))
+                .push(button("Close").on_press(Message::CloseWindow))
+                .spacing(10),
             text(if self.tray.is_some() {
                 "The app keeps running in the tray. To quit: right-click the tray icon → Quit."
             } else {
@@ -291,7 +408,62 @@ impl App {
             .size(12),
         ]
         .spacing(14)
-        .padding(20)
+        .padding(20);
+
+        row![sidebar, content].into()
+    }
+
+    fn page(&self) -> Element<'_, Message> {
+        match self.page {
+            Page::General => {
+                let language = LANGUAGES
+                    .iter()
+                    .find(|l| l.code == self.config.language)
+                    .copied();
+                let microphone = Microphone(self.config.microphone.clone());
+                column![
+                    setting("Language", pick_list(LANGUAGES, language, Message::Language)),
+                    setting(
+                        "Microphone",
+                        pick_list(self.microphones.as_slice(), Some(microphone), Message::Microphone)
+                    ),
+                    setting("Shortcut", text(self.hotkey_hint())),
+                ]
+            }
+            Page::VoiceCommands => column![
+                checkbox(self.config.voice_commands)
+                    .label("Type spoken commands as line breaks and punctuation")
+                    .on_toggle(Message::VoiceCommands),
+                text(
+                    "Say a phrase to type what's in the first column: \\n breaks the line, \
+                     punctuation attaches to the previous word, anything else is typed as a \
+                     word. Alternatives are separated by commas. With a fixed language only its \
+                     column works, when detecting from speech all of them. Commands also \
+                     trigger when you mean the word itself."
+                )
+                .size(12),
+                self.command_table(),
+                self.command_buttons(),
+            ],
+            Page::Vocabulary => column![
+                text(
+                    "Replaces words the model keeps getting wrong, in every language. Add each \
+                     way it writes a word. Only whole words match; case and punctuation are \
+                     ignored."
+                )
+                .size(12),
+                self.vocabulary_table(),
+                row![button("Add word").on_press(Message::AddWord)],
+            ],
+            Page::Installation => column![
+                setting("Installation", self.installation()),
+                setting("Autostart", self.autostart()),
+                setting("Version", self.version()),
+            ]
+            .push(self.install_note())
+            .push(row![button("Open log folder").on_press(Message::OpenLogDir)]),
+        }
+        .spacing(14)
         .into()
     }
 
@@ -307,6 +479,99 @@ impl App {
                 Subscription::none()
             },
         ])
+    }
+
+    /// The voice commands, editable: what they type and what to say in each language.
+    fn command_table(&self) -> Element<'_, Message> {
+        let languages = &self.config.command_languages;
+        let header = row![space().width(REMOVE_WIDTH), bold("Types").width(COMMAND_WIDTH)]
+            .extend(languages.iter().map(|language| {
+                let name = LANGUAGES
+                    .iter()
+                    .find(|l| l.code == language)
+                    .map_or(language.as_str(), |l| l.name);
+                row![
+                    bold(name),
+                    space::horizontal(),
+                    remove_button(Message::RemoveCommandLanguage(language.clone())),
+                ]
+                .width(PHRASE_WIDTH)
+                .align_y(Alignment::Center)
+                .into()
+            }))
+            .spacing(TABLE_SPACING)
+            .align_y(Alignment::Center);
+        let rows = self.config.commands.iter().enumerate().map(|(i, command)| {
+            row![
+                remove_button(Message::RemoveCommand(i)),
+                text_input("\\n or .", &command.output.replace('\n', "\\n"))
+                    .id(command_id(i))
+                    .width(COMMAND_WIDTH)
+                    .on_input(move |output| Message::CommandOutput(i, output)),
+            ]
+            .extend(languages.iter().map(|language| {
+                let phrase = command.phrases.get(language).map_or("", String::as_str);
+                text_input("", phrase)
+                    .width(PHRASE_WIDTH)
+                    .on_input(move |phrase| Message::CommandPhrase(i, language.clone(), phrase))
+                    .into()
+            }))
+            .spacing(TABLE_SPACING)
+            .align_y(Alignment::Center)
+            .into()
+        });
+        horizontal_scroll(column![header].extend(rows).spacing(TABLE_SPACING))
+    }
+
+    /// The vocabulary, editable: each word with the ways the model gets it wrong.
+    fn vocabulary_table(&self) -> Element<'_, Message> {
+        let header = row![
+            space().width(REMOVE_WIDTH),
+            bold("Types").width(WORD_WIDTH),
+            bold("Recognized as"),
+        ]
+        .spacing(TABLE_SPACING);
+        let rows = self.config.vocabulary.iter().enumerate().map(|(i, word)| {
+            row![
+                remove_button(Message::RemoveWord(i)),
+                text_input("Kubernetes", &word.written)
+                    .id(word_id(i))
+                    .width(WORD_WIDTH)
+                    .on_input(move |written| Message::VocabularyWritten(i, written)),
+            ]
+            .extend(word.heard.iter().enumerate().map(|(v, heard)| {
+                text_input("cube netties", heard)
+                    .id(heard_id(i, v))
+                    .width(WORD_WIDTH)
+                    .on_input(move |heard| Message::VocabularyHeard(i, v, heard))
+                    .into()
+            }))
+            .push(button(text("+")).style(button::text).on_press(Message::AddHeard(i)))
+            .spacing(TABLE_SPACING)
+            .align_y(Alignment::Center)
+            .into()
+        });
+        horizontal_scroll(column![header].extend(rows).spacing(TABLE_SPACING))
+    }
+
+    fn command_buttons(&self) -> Element<'_, Message> {
+        let addable: Vec<Language> = LANGUAGES
+            .iter()
+            .filter(|l| ![language::DETECT, language::SYSTEM].contains(&l.code))
+            .filter(|l| !self.config.command_languages.iter().any(|c| c == l.code))
+            .copied()
+            .collect();
+        row![
+            button("Add command").on_press(Message::AddCommand),
+            pick_list(addable, None::<Language>, Message::AddCommandLanguage)
+                .placeholder("Add language …"),
+            space::horizontal(),
+            button("Reset to defaults")
+                .style(button::secondary)
+                .on_press(Message::ResetCommands),
+        ]
+        .spacing(10)
+        .into()
     }
 
     /// Where the app runs from, with the button to install or uninstall it.
@@ -433,7 +698,7 @@ impl App {
         self.install_error = None;
 
         let (id, open) = window::open(window::Settings {
-            size: Size::new(520.0, 500.0),
+            size: Size::new(780.0, 500.0),
             resizable: false,
             // Wayland does not tell apps about minimizing, so there is nothing to hide on.
             minimizable: cfg!(windows),
@@ -459,12 +724,86 @@ impl App {
         }
     }
 
+    /// Hands the settings to the dictation and saves them.
     fn apply_config(&mut self) {
+        self.edit_config();
+        self.save_config();
+    }
+
+    /// For typing into a field: the dictation gets every change, the file is written when
+    /// the window closes.
+    fn edit_config(&mut self) {
         self.config_tx.send_replace(self.config.clone());
+        self.unsaved = true;
+    }
+
+    fn save_config(&mut self) {
+        if !self.unsaved {
+            return;
+        }
+        self.unsaved = false;
         if let Err(err) = self.config.save() {
             tracing::error!("Failed to save settings: {err:#}");
         }
     }
+
+    /// When the window closes: drops empty table rows and fields, then saves.
+    fn tidy_and_save_config(&mut self) {
+        let before = self.config.clone();
+        for word in &mut self.config.vocabulary {
+            word.heard.retain(|heard| !heard.trim().is_empty());
+        }
+        self.config
+            .vocabulary
+            .retain(|word| !word.written.trim().is_empty() || !word.heard.is_empty());
+        self.config
+            .commands
+            .retain(|command| !command.output.is_empty() || !command.phrases.is_empty());
+        if self.config != before {
+            self.edit_config();
+        }
+        self.save_config();
+    }
+
+    fn exit(&mut self) -> Task<Message> {
+        self.tidy_and_save_config();
+        iced::exit()
+    }
+}
+
+/// Lets a table grow wider than the window. Nothing inside may fill the width: it is
+/// unbounded here.
+fn horizontal_scroll<'a>(content: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
+    scrollable(content).horizontal().spacing(6).into()
+}
+
+fn command_id(index: usize) -> widget::Id {
+    widget::Id::from(format!("command-{index}"))
+}
+
+fn word_id(index: usize) -> widget::Id {
+    widget::Id::from(format!("word-{index}"))
+}
+
+fn heard_id(index: usize, variant: usize) -> widget::Id {
+    widget::Id::from(format!("heard-{index}-{variant}"))
+}
+
+fn bold<'a>(label: &'a str) -> text::Text<'a> {
+    text(label).font(Font {
+        weight: font::Weight::Bold,
+        ..Font::DEFAULT
+    })
+}
+
+/// Small "×" to delete a row or column.
+fn remove_button<'a>(message: Message) -> Element<'a, Message> {
+    button(text("×").center())
+        .style(button::text)
+        .width(REMOVE_WIDTH)
+        .padding([2, 0])
+        .on_press(message)
+        .into()
 }
 
 fn setting<'a>(label: &'a str, control: impl Into<Element<'a, Message>>) -> Element<'a, Message> {
@@ -528,6 +867,33 @@ enum UpdateState {
     Available(update::Release),
     /// Downloading and installing this version.
     Downloading(String),
+}
+
+/// Pages of the settings window, listed in the sidebar.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Page {
+    General,
+    VoiceCommands,
+    Vocabulary,
+    Installation,
+}
+
+impl Page {
+    const ALL: [Page; 4] = [
+        Page::General,
+        Page::VoiceCommands,
+        Page::Vocabulary,
+        Page::Installation,
+    ];
+
+    fn title(self) -> &'static str {
+        match self {
+            Page::General => "General",
+            Page::VoiceCommands => "Voice commands",
+            Page::Vocabulary => "Vocabulary",
+            Page::Installation => "Installation",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]

@@ -14,6 +14,7 @@ use crate::audio;
 use crate::config::Config;
 use crate::hotkey::{Hotkey, HotkeyEvent};
 use crate::language;
+use crate::rewrite::Rewriter;
 use crate::typer::Typer;
 
 #[cfg(target_os = "linux")]
@@ -174,6 +175,7 @@ async fn dictate(
     tracing::info!(setting = settings.language, language, "Dictation started");
     let mut dictation = engine.start_dictation(Some(&language)).await?;
     let (mic, pump) = start_microphone(&dictation, settings.microphone.as_deref())?;
+    let mut rewriter = Rewriter::new(&language, settings);
     let mut out = LiveOutput::new(typer);
 
     // Recording: until the shortcut is pressed again.
@@ -186,7 +188,7 @@ async fn dictate(
             },
             _ = out.hold_expired() => out.release().await?,
             piece = dictation.next() => match piece {
-                Some(piece) => out.push(&piece?).await?,
+                Some(piece) => out.push(&rewriter.push(&piece?)).await?,
                 None => break,
             },
         }
@@ -202,11 +204,12 @@ async fn dictate(
             event = hotkey.next() => if event == Some(HotkeyEvent::Released) { out.release().await? },
             _ = out.hold_expired() => out.release().await?,
             piece = dictation.next() => match piece {
-                Some(piece) => out.push(&piece?).await?,
+                Some(piece) => out.push(&rewriter.push(&piece?)).await?,
                 None => break,
             },
         }
     }
+    out.push(&rewriter.finish()).await?;
     out.wait_and_flush().await?;
     tracing::info!("Dictation stopped");
     Ok(())

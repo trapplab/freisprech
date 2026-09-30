@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Voice commands such as "new line", "new paragraph", "comma" and "full stop" in English and German, editable in the settings, also for more languages.
+- Custom vocabulary in the settings: replace words the model gets wrong.
+
+### Changed
+
+- The settings window has a sidebar with pages.
+
 ## [0.3.0] - 2026-09-28
 
 ### Added

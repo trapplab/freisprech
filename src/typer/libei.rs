@@ -26,6 +26,8 @@ const DEVICE_TIMEOUT: Duration = Duration::from_secs(5);
 const TEXT_DEVICE_GRACE: Duration = Duration::from_millis(300);
 /// Pause between synthetic key strokes so slow applications keep up.
 const KEY_DELAY: Duration = Duration::from_millis(3);
+/// Longest string `ei_text.utf8` accepts.
+const MAX_TEXT_BYTES: usize = 254;
 
 pub struct Typer {
     _portal: RemoteDesktop,
@@ -133,8 +135,19 @@ impl Typer {
                     .device
                     .interface::<ei::Text>()
                     .context("Device has no ei_text")?;
-                text_iface.utf8(text);
-                self.frame(&device);
+                for (i, line) in text.split('\n').enumerate() {
+                    // Applications take a line break only as the Enter key.
+                    if i > 0 {
+                        for state in [ei::keyboard::KeyState::Press, ei::keyboard::KeyState::Released] {
+                            text_iface.keysym(xkb::Keysym::Return.raw(), state);
+                            self.frame(&device);
+                        }
+                    }
+                    for chunk in utf8_chunks(line, MAX_TEXT_BYTES) {
+                        text_iface.utf8(chunk);
+                        self.frame(&device);
+                    }
+                }
                 self.flush()?;
             }
             Some(keys) => {
@@ -227,6 +240,22 @@ async fn wait_for_device(connection: &Connection, events: &mut EiConvertEventStr
         }
     }
     keyboard.context("Compositor provided no keyboard device")
+}
+
+/// Splits `text` into pieces of at most `max` bytes, on character boundaries.
+fn utf8_chunks(mut text: &str, max: usize) -> impl Iterator<Item = &str> {
+    std::iter::from_fn(move || {
+        if text.is_empty() {
+            return None;
+        }
+        let mut end = text.len().min(max);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        let (chunk, rest) = text.split_at(end);
+        text = rest;
+        Some(chunk)
+    })
 }
 
 /// libei uses evdev keycodes, xkb keycodes are offset by 8.
