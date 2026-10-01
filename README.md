@@ -16,7 +16,7 @@ Local dictation assistant for Linux and Windows. **Ctrl+Alt+D** starts and stops
 
 The language is detected from speech, so you can switch languages while dictating. In the settings you can fix it to one language or to the *System language* (Linux `LANG`, Windows regional format); a fixed language only recognizes that language.
 
-Settings (language, microphone, voice commands, vocabulary) are available from the tray icon, and on Linux also by starting the program a second time or from the app menu. Quit via the tray menu, or without a tray via the button in the settings window.
+Settings (language, microphone, voice commands, vocabulary, final text) are available from the tray icon, and on Linux also by starting the program a second time or from the app menu. Quit via the tray menu, or without a tray via the button in the settings window.
 
 ### Voice commands
 
@@ -43,6 +43,16 @@ The model can't learn new words, but Freisprech can replace words the model cons
 
 Only whole words match; case and punctuation are ignored. To find out what the model writes for a word, dictate it with `--record`: the text shown while recording comes before any replacement.
 
+### Final text (experimental)
+
+*Text* in the settings chooses how the typed text is made, to compare:
+
+- **Live while speaking** (default): typed as the streaming model recognizes it.
+- **Corrected by qwen3-0.6b (LLM)**: the small language model fixes capitalization, punctuation and grammar and drops filler words (600 MB download). It often drops or changes parts of the text.
+- **Transcribed again by Whisper**: Whisper transcribes the recording once more, with large-v3-turbo (1.4 GB download, accurate, slow), medium (940 MB) or small (440 MB, faster, less accurate). It can't stream, so it works on sections of about 20 s cut at pauses while you speak; after stopping, only the last section is left.
+
+All but the first type the text after stopping. The model is downloaded and loaded on the next dictation. To compare on the command line: `--polish` and `--whisper`.
+
 Changes in the settings apply to the next dictation right away and are saved when the settings window closes; empty rows and fields are dropped then.
 
 ### Install, autostart, uninstall
@@ -63,6 +73,8 @@ Everything goes into the user's home folder, no admin rights needed.
 | `--toggle` | Linux only: start/stop dictation in the running instance (fallback if the desktop offers no global shortcut) |
 | `--file <pcm>` | Test: transcribe a file (16 kHz, mono, s16le), with voice commands and vocabulary applied |
 | `--record <pcm>` | Test: dictate until Enter, print the text and save the audio as the model received it, for `--file` |
+| `--polish [text]` | Test: correct the text with the local LLM and print both versions; without text, with `--file` or `--record`, the transcript |
+| `--whisper [model]` | With `--file`: also transcribe with Whisper, in sections as with the setting, and print both versions (with `--realtime` as if spoken). Model: `whisper-large-v3-turbo` (default), `whisper-medium` or `whisper-small` |
 | `--language <code>` | With `--file` or `--record`: language instead of the setting, e.g. `en`, `de-DE`, `auto`, `system` |
 | `--type-text <text>` | Test: type text without speech recognition |
 

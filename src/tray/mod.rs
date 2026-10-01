@@ -30,7 +30,9 @@ fn icon_rgba(status: &Status) -> Vec<u8> {
     let [r, g, b] = match status {
         Status::Recording => [0xd9, 0x30, 0x25],
         Status::Ready { .. } => [0x3d, 0x7e, 0xc9],
-        Status::Starting | Status::Downloading(_) | Status::LoadingModel => [0xe0, 0xa1, 0x00],
+        Status::Starting | Status::Downloading(_) | Status::LoadingModel | Status::Finishing => {
+            [0xe0, 0xa1, 0x00]
+        }
         Status::Error(_) | Status::Fatal(_) => [0x70, 0x70, 0x70],
     };
     let center = (ICON_SIZE as f32 - 1.0) / 2.0;

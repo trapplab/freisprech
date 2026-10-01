@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Voice commands such as "new line", "new paragraph", "comma" and "full stop" in English and German, editable in the settings, also for more languages.
 - Custom vocabulary in the settings: replace words the model gets wrong.
+- Experimental final text in the settings: corrected by a local LLM (qwen3-0.6b) or transcribed again by Whisper (large-v3-turbo, medium or small), typed after stopping. On the command line: `--polish`, `--whisper`.
 
 ### Changed
 

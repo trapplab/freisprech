@@ -20,6 +20,59 @@ pub struct Config {
     pub commands: Vec<VoiceCommand>,
     /// Words the model gets wrong, replaced after recognition.
     pub vocabulary: Vec<Replacement>,
+    /// Experimental: how the typed text is made.
+    pub final_text: FinalText,
+}
+
+/// Experimental, for comparison: all but `Live` type the text after stopping.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FinalText {
+    /// As the streaming model recognizes it.
+    #[default]
+    Live,
+    /// Corrected with a local LLM.
+    Llm,
+    /// Transcribed again with Whisper.
+    Whisper,
+    /// Transcribed again with the small Whisper model.
+    #[serde(rename = "whisper-small")]
+    WhisperSmall,
+    /// Transcribed again with the medium Whisper model.
+    #[serde(rename = "whisper-medium")]
+    WhisperMedium,
+}
+
+impl FinalText {
+    pub const ALL: [Self; 5] = [
+        Self::Live,
+        Self::Llm,
+        Self::Whisper,
+        Self::WhisperMedium,
+        Self::WhisperSmall,
+    ];
+
+    /// The Whisper model to transcribe again with, if any.
+    pub fn whisper_model(self) -> Option<&'static str> {
+        match self {
+            FinalText::Whisper => Some(crate::whisper::DEFAULT_MODEL),
+            FinalText::WhisperSmall => Some(crate::whisper::SMALL_MODEL),
+            FinalText::WhisperMedium => Some(crate::whisper::MEDIUM_MODEL),
+            FinalText::Live | FinalText::Llm => None,
+        }
+    }
+}
+
+impl std::fmt::Display for FinalText {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            FinalText::Live => "Live while speaking",
+            FinalText::Llm => "Corrected by qwen3-0.6b (LLM)",
+            FinalText::Whisper => "Transcribed again by Whisper large-v3-turbo",
+            FinalText::WhisperSmall => "Transcribed again by Whisper small",
+            FinalText::WhisperMedium => "Transcribed again by Whisper medium",
+        })
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
@@ -75,6 +128,7 @@ impl Default for Config {
             command_languages: VoiceCommand::default_languages(),
             commands: VoiceCommand::defaults(),
             vocabulary: Vec::new(),
+            final_text: FinalText::Live,
         }
     }
 }

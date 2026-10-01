@@ -26,43 +26,8 @@ pub struct AsrEngine {
 impl AsrEngine {
     /// Downloads the model on first use (reporting progress in percent) and loads it.
     pub async fn load(alias: &str, on_progress: impl FnMut(f64) + Send + 'static) -> Result<Self> {
-        let log_level = if tracing::enabled!(tracing::Level::DEBUG) {
-            LogLevel::Debug
-        } else {
-            LogLevel::Warn
-        };
-        let mut config = FoundryLocalConfig::new(APP_NAME).log_level(log_level);
-        if let Some(dir) = native_lib_dir()? {
-            config = config.library_path(dir);
-        }
-        let manager = FoundryLocalManager::create(config)
-            .context("Failed to initialize Foundry Local")?;
-        let model = manager
-            .catalog()
-            .get_model(alias)
-            .await
-            .with_context(|| format!("Model '{alias}' not in catalog"))?;
-        tracing::info!(id = model.id(), "Model found");
-
-        if !model.is_cached().await? {
-            let mut on_progress = on_progress;
-            let mut progress = DownloadProgress::new();
-            let terminal = progress.terminal;
-            tracing::info!("Downloading model …");
-            let result = model
-                .download(Some(move |p| {
-                    progress.update(p);
-                    on_progress(p);
-                }))
-                .await;
-            if terminal {
-                eprintln!();
-            }
-            result?;
-            tracing::info!("Model downloaded");
-        }
+        let (manager, model) = fetch_model(alias, on_progress).await?;
         model.load().await?;
-
         Ok(Self {
             _manager: manager,
             model,
@@ -146,6 +111,51 @@ impl Dictation {
         // Removed language tags leave double spaces behind.
         Ok(self.text.split_whitespace().collect::<Vec<_>>().join(" "))
     }
+}
+
+/// Looks up a Foundry Local model and downloads it on first use (reporting progress in
+/// percent); load it with [`Model::load`]. The manager is shared by all models and must
+/// outlive them.
+pub async fn fetch_model(
+    alias: &str,
+    on_progress: impl FnMut(f64) + Send + 'static,
+) -> Result<(Arc<FoundryLocalManager>, Arc<Model>)> {
+    let log_level = if tracing::enabled!(tracing::Level::DEBUG) {
+        LogLevel::Debug
+    } else {
+        LogLevel::Warn
+    };
+    let mut config = FoundryLocalConfig::new(APP_NAME).log_level(log_level);
+    if let Some(dir) = native_lib_dir()? {
+        config = config.library_path(dir);
+    }
+    let manager =
+        FoundryLocalManager::create(config).context("Failed to initialize Foundry Local")?;
+    let model = manager
+        .catalog()
+        .get_model(alias)
+        .await
+        .with_context(|| format!("Model '{alias}' not in catalog"))?;
+    tracing::info!(id = model.id(), "Model found");
+
+    if !model.is_cached().await? {
+        let mut on_progress = on_progress;
+        let mut progress = DownloadProgress::new();
+        let terminal = progress.terminal;
+        tracing::info!("Downloading model …");
+        let result = model
+            .download(Some(move |p| {
+                progress.update(p);
+                on_progress(p);
+            }))
+            .await;
+        if terminal {
+            eprintln!();
+        }
+        result?;
+        tracing::info!("Model downloaded");
+    }
+    Ok((manager, model))
 }
 
 /// With `language = "auto"` the model emits the detected locale as a token, e.g. `" <de-DE>"`.

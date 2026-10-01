@@ -20,7 +20,7 @@ use tokio::sync::{mpsc, watch};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::audio;
-use crate::config::{Config, Replacement, VoiceCommand};
+use crate::config::{Config, FinalText, Replacement, VoiceCommand};
 use crate::controller::Status;
 use crate::install;
 use crate::language;
@@ -87,6 +87,7 @@ enum Message {
     Page(Page),
     Language(Language),
     Microphone(Microphone),
+    FinalText(FinalText),
     VoiceCommands(bool),
     CommandOutput(usize, String),
     /// Command, language code, phrases.
@@ -224,6 +225,10 @@ impl App {
             }
             Message::Microphone(microphone) => {
                 self.config.microphone = microphone.0;
+                self.apply_config();
+            }
+            Message::FinalText(final_text) => {
+                self.config.final_text = final_text;
                 self.apply_config();
             }
             Message::VoiceCommands(enabled) => {
@@ -428,6 +433,22 @@ impl App {
                         pick_list(self.microphones.as_slice(), Some(microphone), Message::Microphone)
                     ),
                     setting("Shortcut", text(self.hotkey_hint())),
+                    setting(
+                        "Text (experimental)",
+                        column![
+                            pick_list(
+                                FinalText::ALL,
+                                Some(self.config.final_text),
+                                Message::FinalText
+                            ),
+                            text(
+                                "All but live type the text after stopping. The model \
+                                 (0.4 to 1.4 GB) is downloaded on the next dictation."
+                            )
+                            .size(12),
+                        ]
+                        .spacing(4)
+                    ),
                 ]
             }
             Page::VoiceCommands => column![
@@ -671,7 +692,7 @@ impl App {
 
     /// Working on something that reports no progress of its own.
     fn busy(&self) -> bool {
-        matches!(self.status, Status::Starting | Status::LoadingModel)
+        matches!(self.status, Status::Starting | Status::LoadingModel | Status::Finishing)
     }
 
     /// The model download reports percent; starting and loading only that they run.

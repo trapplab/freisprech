@@ -1,7 +1,9 @@
 //! The dictation loop: shortcut -> microphone -> ASR -> live typing.
 //! Runs on its own thread with its own tokio runtime, next to the UI thread.
 
+use std::collections::HashMap;
 use std::io::Write;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{bail, Result};
@@ -11,11 +13,13 @@ use tokio::time::Instant;
 
 use crate::asr::{self, AsrEngine, Dictation};
 use crate::audio;
-use crate::config::Config;
+use crate::config::{Config, FinalText};
 use crate::hotkey::{Hotkey, HotkeyEvent};
 use crate::language;
+use crate::polish::{self, Polisher};
 use crate::rewrite::Rewriter;
 use crate::typer::Typer;
+use crate::whisper::{Sections, Whisper};
 
 #[cfg(target_os = "linux")]
 pub const APP_ID: &str = "io.github.trapplab.Freisprech";
@@ -33,6 +37,8 @@ pub enum Status {
     /// `shortcut`: whether the global shortcut is bound, else only `--toggle` works.
     Ready { shortcut: bool },
     Recording,
+    /// Making the final text after stopping, see [`FinalText`].
+    Finishing,
     /// The last dictation failed; the next one may still work.
     Error(String),
     /// Setup failed; nothing works until restart.
@@ -50,6 +56,7 @@ impl Status {
                 "Ready – no global shortcut, see settings".into()
             }
             Status::Recording => "Recording – press the shortcut again to stop".into(),
+            Status::Finishing => "Finishing text …".into(),
             Status::Error(msg) => format!("Last dictation failed: {msg}"),
             Status::Fatal(msg) => format!("Error: {msg}"),
         }
@@ -142,13 +149,28 @@ async fn run(
     })
     .await?;
     let _ = status.send(ready.clone());
+    let mut finishers = Finishers::default();
 
     loop {
         match hotkey.next().await {
             Some(HotkeyEvent::Pressed) => {
                 let settings = config.borrow().clone();
+                if let Err(err) = finishers.prepare(settings.final_text, &status).await {
+                    tracing::error!("Failed to load the model: {err:#}");
+                    let _ = status.send(Status::Error(format!("{err:#}")));
+                    continue;
+                }
                 let _ = status.send(Status::Recording);
-                match dictate(&engine, &settings, &mut typer, &mut hotkey).await {
+                let result = dictate(
+                    &engine,
+                    &finishers,
+                    &settings,
+                    &mut typer,
+                    &mut hotkey,
+                    &status,
+                )
+                .await;
+                match result {
                     Ok(()) => {
                         let _ = status.send(ready.clone());
                     }
@@ -164,19 +186,58 @@ async fn run(
     }
 }
 
+/// Models for [`FinalText`], loaded on the first dictation that needs them, then kept.
+#[derive(Default)]
+struct Finishers {
+    polisher: Option<Polisher>,
+    /// By model.
+    whisper: HashMap<&'static str, Arc<Whisper>>,
+}
+
+impl Finishers {
+    async fn prepare(
+        &mut self,
+        final_text: FinalText,
+        status: &mpsc::UnboundedSender<Status>,
+    ) -> Result<()> {
+        let progress = status.clone();
+        let on_progress = move |p| {
+            let _ = progress.send(Status::Downloading(p));
+        };
+        if final_text == FinalText::Llm && self.polisher.is_none() {
+            let _ = status.send(Status::LoadingModel);
+            self.polisher = Some(Polisher::load(polish::DEFAULT_MODEL, on_progress).await?);
+        } else if let Some(model) = final_text.whisper_model() {
+            if !self.whisper.contains_key(model) {
+                let _ = status.send(Status::LoadingModel);
+                let whisper = Whisper::load(model, on_progress).await?;
+                self.whisper.insert(model, Arc::new(whisper));
+            }
+        }
+        Ok(())
+    }
+}
+
 /// One dictation from shortcut press to shortcut press, typing text as it is recognized.
+/// Unless [`FinalText::Live`], the text is typed after stopping instead.
 async fn dictate(
     engine: &AsrEngine,
+    finishers: &Finishers,
     settings: &Config,
     typer: &mut Typer,
     hotkey: &mut Hotkey,
+    status: &mpsc::UnboundedSender<Status>,
 ) -> Result<()> {
     let language = language::resolve(&settings.language);
     tracing::info!(setting = settings.language, language, "Dictation started");
     let mut dictation = engine.start_dictation(Some(&language)).await?;
-    let (mic, pump) = start_microphone(&dictation, settings.microphone.as_deref())?;
+    let whisper = settings.final_text.whisper_model();
+    let whisper = whisper.and_then(|model| finishers.whisper.get(model));
+    let sections = whisper.map(|whisper| Sections::start(whisper.clone(), &language));
+    let (mic, pump) = start_microphone(&dictation, settings.microphone.as_deref(), sections)?;
     let mut rewriter = Rewriter::new(&language, settings);
-    let mut out = LiveOutput::new(typer);
+    let live = settings.final_text == FinalText::Live;
+    let mut out = LiveOutput::new(typer, live);
 
     // Recording: until the shortcut is pressed again.
     loop {
@@ -197,7 +258,7 @@ async fn dictate(
     // Stopping: close the microphone, then type what the model still has buffered.
     out.hold();
     mic.stop();
-    pump.await?;
+    let sections = pump.await?;
     dictation.end_audio();
     loop {
         tokio::select! {
@@ -210,6 +271,28 @@ async fn dictate(
         }
     }
     out.push(&rewriter.finish()).await?;
+    if !live {
+        let _ = status.send(Status::Finishing);
+        let start = std::time::Instant::now();
+        let polisher = finishers.polisher.as_ref();
+        let result = match (sections, polisher.filter(|_| settings.final_text == FinalText::Llm)) {
+            (Some(sections), _) => sections
+                .finish()
+                .await
+                .map(|text| Rewriter::new(&language, settings).apply(&text)),
+            (None, Some(polisher)) => polisher.polish(&out.pending).await,
+            (None, None) => Ok(out.pending.clone()),
+        };
+        match result {
+            Ok(text) => {
+                let ms = start.elapsed().as_millis();
+                tracing::info!(ms, live = out.pending, text, "Final text");
+                out.pending = text;
+            }
+            // Better the live text than none.
+            Err(err) => tracing::error!("Final text failed, typing the live one: {err:#}"),
+        }
+    }
     out.wait_and_flush().await?;
     tracing::info!("Dictation stopped");
     Ok(())
@@ -219,15 +302,18 @@ async fn dictate(
 /// otherwise the held Ctrl+Alt would turn the typed letters into shortcuts.
 struct LiveOutput<'a> {
     typer: &'a mut Typer,
+    /// Without, everything is typed at the end by [`wait_and_flush`](Self::wait_and_flush).
+    live: bool,
     pending: String,
     held_until: Option<Instant>,
     at_start: bool,
 }
 
 impl<'a> LiveOutput<'a> {
-    fn new(typer: &'a mut Typer) -> Self {
+    fn new(typer: &'a mut Typer, live: bool) -> Self {
         let mut out = Self {
             typer,
+            live,
             pending: String::new(),
             held_until: None,
             at_start: true,
@@ -242,6 +328,9 @@ impl<'a> LiveOutput<'a> {
 
     async fn release(&mut self) -> Result<()> {
         self.held_until = None;
+        if !self.live {
+            return Ok(());
+        }
         self.flush().await
     }
 
@@ -257,7 +346,7 @@ impl<'a> LiveOutput<'a> {
         eprint!("{piece}");
         let _ = std::io::stderr().flush();
         self.pending.push_str(piece);
-        if self.held_until.is_none() {
+        if self.live && self.held_until.is_none() {
             self.flush().await?;
         }
         Ok(())
@@ -267,7 +356,8 @@ impl<'a> LiveOutput<'a> {
         if self.held_until.is_some() {
             self.hold_expired().await;
         }
-        self.release().await
+        self.held_until = None;
+        self.flush().await
     }
 
     async fn flush(&mut self) -> Result<()> {
@@ -286,12 +376,14 @@ impl<'a> LiveOutput<'a> {
     }
 }
 
-/// Opens the microphone and forwards its audio into the dictation.
-/// Stopping or dropping the returned microphone ends the pump task.
+/// Opens the microphone and forwards its audio into the dictation, and into `sections` if
+/// given. Stopping or dropping the returned microphone ends the pump task, which then
+/// returns `sections`.
 fn start_microphone(
     dictation: &Dictation,
     device: Option<&str>,
-) -> Result<(audio::Microphone, JoinHandle<()>)> {
+    mut sections: Option<Sections>,
+) -> Result<(audio::Microphone, JoinHandle<Option<Sections>>)> {
     let input = dictation.input();
     let (pcm_tx, mut pcm_rx) = mpsc::channel::<Vec<i16>>(32);
     let pump = tokio::spawn(async move {
@@ -300,7 +392,11 @@ fn start_microphone(
                 tracing::error!(%err, "Failed to pass audio to the ASR");
                 break;
             }
+            if let Some(sections) = &mut sections {
+                sections.push(&chunk);
+            }
         }
+        sections
     });
     let mic = audio::Microphone::start(device, pcm_tx)?;
     Ok((mic, pump))
