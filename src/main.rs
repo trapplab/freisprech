@@ -12,6 +12,8 @@ mod tray;
 mod typer;
 mod ui;
 mod update;
+#[cfg(target_os = "linux")]
+mod x11;
 
 use std::fs::File;
 use std::io::{BufWriter, Write};

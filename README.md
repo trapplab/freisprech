@@ -45,7 +45,8 @@ Everything goes into the user's home folder, no admin rights needed.
 |---|---|
 | KDE Plasma 6 (Wayland) | works, tested on Fedora 44 |
 | Ubuntu 26.04, Debian 13 (GNOME ≥ 48, Wayland) | should work, untested |
-| Ubuntu 24.04, Debian 12 and older | not supported: they lack the GlobalShortcuts portal or keyboard input via libei |
+| X11 desktops (e.g. Xfce, as on Kali Linux) | should work, untested: fixed shortcut Ctrl+Alt+D, typing via XTEST |
+| Ubuntu 24.04, Debian 12 and older (Wayland) | not supported: they lack the GlobalShortcuts portal or keyboard input via libei |
 | Windows | compiles, untested |
 
 The Linux binary needs glibc ≥ 2.35. Debian's GNOME has no tray by default.
@@ -90,4 +91,4 @@ The workflow [`.github/workflows/release.yml`](.github/workflows/release.yml) th
 ## Notes
 
 - **Nightly runtime:** Foundry Local 2.0.1 ignores the language setting when streaming ([Foundry-Local#1064](https://github.com/microsoft/Foundry-Local/issues/1064)). The project therefore uses a nightly build for now. Switch back once a release contains the fix.
-- **Linux:** The shortcut and typing go through the XDG portals (GlobalShortcuts, RemoteDesktop + libei). Only one instance runs at a time: starting a second one opens the settings of the first.
+- **Linux:** On Wayland the shortcut and typing go through the XDG portals (GlobalShortcuts, RemoteDesktop + libei), on X11 through a key grab and the XTEST extension. Only one instance runs at a time: starting a second one opens the settings of the first.

@@ -16,7 +16,8 @@ pub fn install_path() -> Result<PathBuf> {
 }
 
 /// Registers our app ID with the portals. Must precede any other portal call so
-/// permissions are stored under it.
+/// permissions are stored under it. An X11 session only gets the menu entry: nothing
+/// there goes through the portals, and they may not even be installed.
 pub async fn register_app() -> Result<()> {
     const ATTEMPTS: u32 = 20;
     const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(250);
@@ -30,6 +31,9 @@ pub async fn register_app() -> Result<()> {
         .map_or_else(std::env::current_exe, Ok)?;
     if let Err(err) = add_menu_entry(&exe, env!("CARGO_PKG_VERSION")) {
         tracing::warn!("Failed to write desktop entry: {err:#}");
+    }
+    if crate::x11::is_session() {
+        return Ok(());
     }
     // The portal picks up a newly written desktop entry only after a moment; until then
     // it rejects the app ID with "App info not found".

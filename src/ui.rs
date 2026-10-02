@@ -455,6 +455,9 @@ impl App {
                 "Not available – create your own shortcut that runs \"{} --toggle\"",
                 std::env::current_exe().unwrap_or_default().display()
             ),
+            // The X11 key grab is fixed.
+            #[cfg(target_os = "linux")]
+            _ if crate::x11::is_session() => "Ctrl+Alt+D".to_owned(),
             _ => HOTKEY_HINT.to_owned(),
         }
     }

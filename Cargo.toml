@@ -32,12 +32,14 @@ zstd = { version = "0.13", optional = true }
 # cargo build --release --features bundle-native
 bundle-native = ["dep:zstd"]
 
-# Wayland text input: RemoteDesktop portal + libei; tray via StatusNotifierItem
+# Wayland text input: RemoteDesktop portal + libei; X11: XTEST and a key grab;
+# tray via StatusNotifierItem
 [target.'cfg(target_os = "linux")'.dependencies]
 ksni = "0.3.6"
 ashpd = { version = "0.13", default-features = false, features = ["tokio", "remote_desktop", "screencast", "global_shortcuts"] }
 reis = { version = "0.7.1", features = ["tokio"] }
 rustix = { version = "1.1.5", default-features = false, features = ["std", "time"] }
+x11rb = { version = "0.13", features = ["xkb", "xtest"] }
 xkbcommon = { version = "0.9", default-features = false, features = ["wayland"] }
 
 [target."cfg(windows)".dependencies]

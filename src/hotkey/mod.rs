@@ -3,7 +3,7 @@
 #[cfg(target_os = "linux")]
 mod portal;
 #[cfg(target_os = "linux")]
-use portal::Shortcut;
+mod x11;
 
 #[cfg(windows)]
 mod win32;
@@ -17,6 +17,30 @@ pub enum HotkeyEvent {
     Pressed,
     /// All keys of the shortcut are up again; typing is safe from here on.
     Released,
+}
+
+/// Wayland: via the GlobalShortcuts portal. X11: a key grab.
+#[cfg(target_os = "linux")]
+enum Shortcut {
+    Portal(portal::Shortcut),
+    X11(x11::Shortcut),
+}
+
+#[cfg(target_os = "linux")]
+impl Shortcut {
+    async fn bind() -> anyhow::Result<Self> {
+        if crate::x11::is_session() {
+            return Ok(Self::X11(x11::Shortcut::bind()?));
+        }
+        Ok(Self::Portal(portal::Shortcut::bind().await?))
+    }
+
+    async fn next(&mut self) -> Option<HotkeyEvent> {
+        match self {
+            Self::Portal(shortcut) => shortcut.next().await,
+            Self::X11(shortcut) => shortcut.next().await,
+        }
+    }
 }
 
 /// What starts and stops dictations: the global shortcut if the desktop offers one,
