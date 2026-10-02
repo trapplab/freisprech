@@ -1,6 +1,6 @@
 [package]
 name = "freisprech"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "Dictate into any app with local AI"
 repository = "https://github.com/trapplab/freisprech"
