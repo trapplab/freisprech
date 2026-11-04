@@ -1,4 +1,5 @@
-// Windows: a GUI app, so starting it opens no console window; logs go to the log file.
+// Windows: a GUI app, so starting it opens no console window. Started from a terminal,
+// `attach_parent_console` connects to it for log and CLI output.
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 mod asr;
@@ -79,6 +80,8 @@ struct Cli {
 }
 
 fn main() -> Result<()> {
+    #[cfg(windows)]
+    attach_parent_console();
     let cli = Cli::parse();
     #[cfg(target_os = "linux")]
     if cli.toggle {
@@ -99,6 +102,15 @@ fn main() -> Result<()> {
         tracing::error!("{err:#}");
     }
     result
+}
+
+/// Windows: a GUI app has no console of its own. Started from a terminal, write logs,
+/// `--help` and test output there; otherwise (menu, autostart) only the log file is used.
+#[cfg(windows)]
+fn attach_parent_console() {
+    use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+    // Fails without a parent console, which is fine.
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) };
 }
 
 /// Normal operation: controller thread in the background, tray + settings on the main thread.
