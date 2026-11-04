@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Windows: no console window opens; output goes to the log file only.
+
 ## [0.3.1] - 2026-10-02
 
 ### Added

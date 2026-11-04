@@ -11,7 +11,7 @@ Local dictation assistant for Linux and Windows. **Ctrl+Alt+D** starts and stops
    - Windows: `freisprech-windows-x86_64.exe`. It is not signed, so SmartScreen warns: *More info → Run anyway*.
 2. On first start:
    - On Linux, confirm two desktop dialogs: the keyboard shortcut and permission to type.
-   - The model (about 760 MB) is downloaded once. Progress is shown in the tray tooltip, the settings window and the console.
+   - The model (about 760 MB) is downloaded once. Progress is shown in the tray tooltip, the settings window and the log (on Linux also the terminal).
 3. **Ctrl+Alt+D** starts dictation, pressing **Ctrl+Alt+D** again stops it.
 
 The language is detected from speech, so you can switch languages while dictating. In the settings you can fix it to one language or to the *System language* (Linux `LANG`, Windows regional format); a fixed language only recognizes that language.

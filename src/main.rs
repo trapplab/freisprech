@@ -1,3 +1,6 @@
+// Windows: a GUI app, so starting it opens no console window; logs go to the log file.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 mod asr;
 mod audio;
 mod config;
